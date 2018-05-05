@@ -84,7 +84,7 @@ Change other user's passwords|No|No|No
 
 Release|Supported since|Supported until|Download
 ---|---|---|---
-0.1|May 5, 2018
+0.1|May 5, 2018||[Link](https://github.com/Edison2ST/Filamp/archive/v0.1.0.zip)
 
 ## Upcoming features for the next releases
 
