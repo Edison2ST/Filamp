@@ -10,7 +10,13 @@ Filamp is still in development, so the latest release is a development release. 
 
 If you are the only one user, then it should not be a problem for you. But remember, this is a development release, not a stable release.
 
-## How to set up Filamp (basic install)
+## Requirements
+
+Recommended: Latest releases of PHP and MySQL.
+
+It should work under PHP 7.0 or newer and MySQL 5.0.3 or newer. This project was tested under PHP 7.2.4 and MySQL 5.5.5-10.1.31-MariaDB.
+
+## How to set up Filamp (basic installation)
 
 1. Install latest release of [XAMPP](https://www.apachefriends.org/download.html) (Recommended, but you could use Wampserver for example).
 2. Start Apache and MySQL in the XAMPP Control Panel.
@@ -82,9 +88,9 @@ Change other user's passwords|No|No|No
 
 ## Current releases
 
-Release|Supported since|Supported until|Download
----|---|---|---
-0.1|May 5, 2018||[Link](https://github.com/Edison2ST/Filamp/archive/v0.1.0.zip)
+Release|Last Patch|Supported since|Supported until|Download
+---|---|---|---|---
+0.1|1|May 5, 2018||[Link](https://github.com/Edison2ST/Filamp/archive/v0.1.1.zip)
 
 ## Upcoming features for the next releases
 
@@ -93,11 +99,15 @@ Release|Supported since|Supported until|Download
 
 ## Security implementations
 
-The passwords are strongly encrypted in the MySQL database. Also, we do not store the passwords in the cookies or sessions, we store tokens in sessions, and these ones expire within 24 hours since they were created.
+The passwords are strongly encrypted in the MySQL database. Also, we do not store the passwords in the cookies or sessions, we store tokens in sessions, and these ones expire within 24 hours since they were created. It takes two seconds to login as a security implementation.
 
 The script is also designed to work against SQL injection, XSS and CSRF and other ways of exploit. Some of them are still possible, so make sure that you have logged out from Filamp.
 
 You can't edit this script using this script to do that, but there are other ways to do it. Coming soon more security implementations for the next releases.
+
+## File size
+
+The script may not work properly if there are files larger than 2GB. This is because [int filesize (string $filename)](http://php.net/manual/en/function.filesize.php) works with integers and the value of [PHP_INT_MAX](http://php.net/manual/en/reserved.constants.php) is usually int(2147483647). Also, I want the script to be simple and compatible with current operating systems.
 
 ## Github pages
 

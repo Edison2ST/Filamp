@@ -15,7 +15,7 @@ class Database
     private $prefix;
     private $user;
     private $password;
-    public $privilege;
+    private $privilege;
     private $token;
     private $expires;
     private $admin;
@@ -28,7 +28,7 @@ class Database
         $this->mysqli->query("CREATE TABLE IF NOT EXISTS ".$prefix."users(user VARCHAR(20), password CHAR(53), privilege INT DEFAULT 1, token CHAR(156) DEFAULT '', expires TIMESTAMP DEFAULT '0000-00-00 00:00:00')") or exit("Error in MySQL");
         $this->mysqli->query("CREATE TABLE IF NOT EXISTS ".$prefix."log(user VARCHAR(20), id INT, dir1 VARCHAR(250), dir2 VARCHAR(250), dir3 VARCHAR(250), time TIMESTAMP)") or exit("Error in MySQL");
     }
-    public function setUser(string $user) : bool
+    public function setUser(string $user, string $token) : bool
     {
         if (strlen($user) < 21 && ctype_alnum($user))
         {
@@ -36,15 +36,17 @@ class Database
             $stmt->bind_param("s", $user) or exit("Error in MySQL");
             $stmt->execute() or exit("Error in MySQL");
             $query = $stmt->get_result() or exit("Error in MySQL");
-            if ($query->num_rows === 1)
+            if ($query->num_rows === 1 && $element = $query->fetch_row())
             {
-                $this->user = $user;
-                $element = $query->fetch_row();
-                $this->password = "$2y$11$".$element[0];
-                $this->privilege = $element[1];
-                $this->token = $element[2];
-                $this->expires = $element[3];
-                $b = true;
+                if ($token === $element[2] && time() < strtotime($element[3]))
+                {
+                    $this->user = $user;
+                    $this->password = "$2y$11$".$element[0];
+                    $this->privilege = $element[1];
+                    $this->token = $element[2];
+                    $this->expires = $element[3];
+                    $b = true;
+                }
             }
             $query->free();
             $stmt->close();
@@ -52,21 +54,28 @@ class Database
         }
         return false;
     }
-    public function checkLogin(string $password)
+    public function checkLogin(string $user, string $password)
     {
         sleep(2);
-        if ($this->password === crypt($password, $this->password))
+        $query = $this->mysqli->prepare("SELECT password FROM ".$this->prefix."users WHERE user=?") or exit("Error in MySQL");
+        $query->bind_param("s", $user) or exit("Error in MySQL");
+        $query->execute() or exit("Error in MySQL");
+        $element = $query->get_result() or exit("Error in MySQL");
+        if ($element->num_rows === 1 && $pass = "$2y$11$".$element->fetch_row()[0])
         {
-            $this->token = bin2hex(random_bytes(78));
-            $this->expires = date("Y-m-d H:i:s", time()+86400);
-            $stmt = $this->mysqli->prepare("UPDATE ".$this->prefix."users SET token='$this->token', expires='$this->expires' WHERE user=?") or exit("Error in MySQL");
-            $stmt->bind_param("s", $this->user) or exit("Error in MySQL");
-            $stmt->execute() or exit("Error in MySQL");
-            if ($this->updatePassword($password)) return $this->token;
+            if ($pass === crypt($password, $pass) && strlen($user) < 21 && ctype_alnum($user))
+            {
+                $this->token = bin2hex(random_bytes(78));
+                $this->expires = date("Y-m-d H:i:s", time()+86400);
+                $stmt = $this->mysqli->prepare("UPDATE ".$this->prefix."users SET token='$this->token', expires='$this->expires' WHERE user=?") or exit("Error in MySQL");
+                $stmt->bind_param("s", $user) or exit("Error in MySQL");
+                $stmt->execute() or exit("Error in MySQL");
+                if ($this->setUser($user, $this->token) && $this->updatePassword($password)) return $this->token;
+            }
         }
         return false;
     }
-    public function compareTokens(string $token) : bool { return $token === $this->token && time() < strtotime($this->expires); }
+    public function getPriv() : int { return $this->privilege; }
     public function updatePassword(string $password) : bool
     {
         $pass = substr(crypt($password, "$2y$11$".str_replace("+", ".", base64_encode(random_bytes(16)))), 7);
@@ -196,10 +205,10 @@ class Database
 // End of MySQL class
 $access = isset($prefix) ? new Database($host, $user, $password, $database, $prefix) : new Database($host, $user, $password, $database);
 session_start();
-if (isset($_SESSION["user"], $_SESSION["token"]) && $access->setUser($_SESSION["user"]) && $access->compareTokens($_SESSION["token"]))
+if (isset($_SESSION["user"], $_SESSION["token"]) && $access->setUser($_SESSION["user"], $_SESSION["token"]))
 {
     ob_start();
-    echo "<head><title>Filamp v.0.1.0</title></head>";
+    echo "<head><title>Filamp v.0.1.1</title></head>";
     if (isset($_POST["logout"]))
     {
         if ($access->logout())
@@ -214,12 +223,12 @@ if (isset($_SESSION["user"], $_SESSION["token"]) && $access->setUser($_SESSION["
     {
         if (isset($_POST["cpassword"], $_POST["password"], $_POST["rpassword"]))
         {
-            if ($s = $access->checkLogin($_POST["cpassword"]))
+            if ($s = $access->checkLogin($_SESSION["user"], $_POST["cpassword"]))
             {
                 $_SESSION["token"] = $s;
                 if ($_POST["password"] === $_POST["rpassword"])
                 {
-                    if ($access->updatePassword($_POST["password"]) && session_destroy()) echo "Password changed successfully. <a href=\"?";
+                    if ($access->updatePassword($_POST["password"]) && $access->logout() && session_destroy()) echo "Password changed successfully. <a href=\"?";
                     else echo "Error. ";
                 }
                 else echo "Passwords do not match. <a href=\"?chpass";
@@ -231,15 +240,15 @@ if (isset($_SESSION["user"], $_SESSION["token"]) && $access->setUser($_SESSION["
     }
     elseif (isset($_GET["manage"]))
     {
-        if (isset($_POST["user"], $_POST["password"], $_POST["privilege"]) && $access->privilege > 1)
+        if (isset($_POST["user"], $_POST["password"], $_POST["privilege"]) && $access->getPriv() > 1)
         {
             if ($_POST["privilege"] < 1 || $_POST["privilege"] > 3) echo "This privilege is not valid.";
-            elseif (($access->privilege === 2 && $_POST["privilege"] >= 2)) echo "You can't select this privilege.";
+            elseif (($access->getPriv() === 2 && $_POST["privilege"] >= 2)) echo "You can't select this privilege.";
             elseif ($access->insertUser($_POST["user"], $_POST["password"], $_POST["privilege"]) && $access->insertLog(9, $_POST["user"], $_POST["privilege"])) echo "Registered sucessfully.";
             else echo "Error.";
             echo " <a href=\"?manage\">Go back!</a>";
         }
-        elseif (isset($_POST["user"], $_POST["privilege"]) && $access->privilege > 2)
+        elseif (isset($_POST["user"], $_POST["privilege"]) && $access->getPriv() > 2)
         {
             $s = $access->getPrivilege($_POST["user"]);
             if ($s && $_POST["privilege"] > 0 && $_POST["privilege"] < 4 && $_POST["user"] !== $_SESSION["user"])
@@ -250,10 +259,10 @@ if (isset($_SESSION["user"], $_SESSION["token"]) && $access->setUser($_SESSION["
             else echo "You are not able to set this privilege, or the user does not exist, or you are this user, or the privilege input is wrong.";
             echo " <a href=\"?manage\">Go back!</a>";
         }
-        elseif (isset($_POST["user"]) && $access->privilege > 1)
+        elseif (isset($_POST["user"]) && $access->getPriv() > 1)
         {
             $s = $access->getPrivilege($_POST["user"]);
-            if ($s && (($access->privilege < 3 && $access->privilege > $s) || ($access->privilege > 2 && $access->privilege >= $s)) && $_POST["user"] !== $_SESSION["user"])
+            if ($s && (($access->getPriv() < 3 && $access->getPriv() > $s) || ($access->getPriv() > 2 && $access->getPriv() >= $s)) && $_POST["user"] !== $_SESSION["user"])
             {
                 if ($access->removeUser($_POST["user"]) && $access->insertLog(11, $_POST["user"], $s)) echo "Success.";
                 else echo "Error.";
@@ -275,14 +284,14 @@ if (isset($_SESSION["user"], $_SESSION["token"]) && $access->setUser($_SESSION["
             echo "</table><br />Current page: $page<br />";
             if ($page !== "1") echo "<a href=\"?manage=".($page-1)."\">Previous page</a><br />";
             echo "<a href=\"?manage=".($page+1)."\">Next page</a><form method=\"get\" action=\"?\">Page: <input type=\"text\" name=\"manage\" /> <input type=\"submit\" value=\"Go!\" /></form>";
-            if ($access->privilege > 1)
+            if ($access->getPriv() > 1)
             {
                 echo "<form method=\"post\" action=\"?manage\">Add member:<br />User: <input type=\"text\" name=\"user\" /><br />Password: <input type=\"password\" name=\"password\" /><br />Privilege: <select name=\"privilege\"><option value=\"1\">Member</option>";
-                if ($access->privilege === 3) echo "<option value=\"2\">Administrator</option><option value=\"3\">Owner</option>";
+                if ($access->getPriv() === 3) echo "<option value=\"2\">Administrator</option><option value=\"3\">Owner</option>";
                 echo "</select><br /><input type=\"submit\" value=\"Add!\"></form>";
             }
-            if ($access->privilege > 2) echo "<form method=\"post\" action=\"?manage\">Set privilege:<br />User: <input type=\"text\" name=\"user\" /><br />Privilege: <select name=\"privilege\"><option value=\"1\">Member</option><option value=\"2\">Administrator</option><option value=\"3\">Owner</option></select><br /><input type=\"submit\" value=\"Set!\"></form>";
-            if ($access->privilege > 1) echo "<form method=\"post\" action=\"?manage\">Remove user: <input type=\"text\" name=\"user\" /> <input type=\"submit\" value=\"Remove!\" /></form>";
+            if ($access->getPriv() > 2) echo "<form method=\"post\" action=\"?manage\">Set privilege:<br />User: <input type=\"text\" name=\"user\" /><br />Privilege: <select name=\"privilege\"><option value=\"1\">Member</option><option value=\"2\">Administrator</option><option value=\"3\">Owner</option></select><br /><input type=\"submit\" value=\"Set!\"></form>";
+            if ($access->getPriv() > 1) echo "<form method=\"post\" action=\"?manage\">Remove user: <input type=\"text\" name=\"user\" /> <input type=\"submit\" value=\"Remove!\" /></form>";
             echo "<a href=\"?\">Go back!</a>";
         }
     }
@@ -448,7 +457,6 @@ if (isset($_SESSION["user"], $_SESSION["token"]) && $access->setUser($_SESSION["
                         list($content, $add) = [htmlspecialchars(fread($gs, 10000)), true];
                         echo "First 10,000 bytes of this file:";
                     }
-                    $content = str_replace("<", "&gt;", $content);
                     echo "<br /><br /><textarea rows=\"10\" cols=\"50\" readonly>$content</textarea><br /><br />";
                     if ($add) echo "The file size is over 10,000 bytes. Instead of previewing the file, download it.<br /><br />";
                     echo "File size: $size B<br /><br />";
@@ -462,32 +470,54 @@ if (isset($_SESSION["user"], $_SESSION["token"]) && $access->setUser($_SESSION["
                 $scan = scandir($dir);
                 while (isset($scan[0]) && in_array($scan[0], [".", ".."])) { array_shift($scan); }
                 echo "<table border=\"1\"><tr><td><strong>Folder or file</strong></td><td><strong>Last modified date</strong></td><td><strong>File size</strong></td></tr>";
-                if (!in_array($get, [".", "/", ""])) echo "<tr><td><a href=\"?dir=".dirname($get, 1)."\">..</a></td><td></td></tr>";
+                $ina = !in_array($get, [".", "/", ""]);
+                if ($ina) echo "<tr><td><a href=\"?dir=".dirname($get, 1)."\">..</a></td><td></td><td></td></tr>";
                 foreach ($scan as $file)
                 {
-                    echo "<tr><td><a href=\"?dir=".fixDirectory($get."/".$file)."\">";
-                    echo is_dir($dir."/".$file) ? $file."/" : $file;
-                    echo "</a></td><td>".date("Y-m-d H:i:s", filemtime($dir."/".$file))."</td><td>".filesize($dir."/".$file)." B</td></tr>";
+                    $isd = is_dir("$dir/$file");
+                    echo "<tr><td><a href=\"?dir=".fixDirectory("$get/$file")."\">";
+                    echo $isd ? "$file/" : $file;
+                    echo "</a></td><td>".date("Y-m-d H:i:s", filemtime($dir."/".$file))."</td><td>";
+                    if (!$isd) echo filesize("$dir/$file")." B";
+                    echo "</td></tr>";
                 }
-                echo "</table><br />Upload file:<br /><br /><form method=\"post\" action=\"?\" enctype=\"multipart/form-data\"><input type=\"file\" name=\"file\" /><input type=\"hidden\" name=\"upload\" value=\"$get\" /><br /><br /><input type=\"submit\" value=\"Upload file\" /></form><form method=\"post\" action=\"?\">Create directory: <input type=\"text\" name=\"mkdir\" value=\"".fixDirectory($get."/")."\" /> <input type=\"submit\" value=\"Create\" /></form><form method=\"post\" action=\"?\"><a href=\"javascript:;\" onclick=\"if (window.confirm('Are you sure you want to remove this directory?')) parentNode.submit();\">Remove this directory</a><input type=\"hidden\" name=\"rmdir\" value=\"$get\" /></form>Welcome $_SESSION[user]!<br />Filamp v.0.1.0. <a href=\"https://github.com/Edison2ST/Filamp\">Github</a><br /><br /><a href=\"?chpass\">Change password</a><br /><a href=\"?manage\">Users</a><br /><a href=\"?log\">Log</a><br /><form method=\"post\" action=\"?\"><a href=\"javascript:;\" onclick=\"parentNode.submit();\">Logout</a><input type=\"hidden\" name=\"logout\" value=\"1\" /></form>";
+                echo "</table><br />Upload file:<br /><br /><form method=\"post\" action=\"?\" enctype=\"multipart/form-data\"><input type=\"file\" name=\"file\" /><input type=\"hidden\" name=\"upload\" value=\"$get\" /><br /><br /><input type=\"submit\" value=\"Upload file\" /></form><form method=\"post\" action=\"?\">Create directory: <input type=\"text\" name=\"mkdir\" value=\"".fixDirectory($get."/")."\" /> <input type=\"submit\" value=\"Create\" /></form>";
+                if ($ina)
+                {
+                    if (empty($scan)) echo "<form method=\"post\" action=\"?\"><a href=\"javascript:;\" onclick=\"if (window.confirm('Are you sure you want to remove this directory?')) parentNode.submit();\">Remove this directory</a><input type=\"hidden\" name=\"rmdir\" value=\"$get\" /></form>";
+                    else echo "If you want to remove this directory, you must delete all the files and directories inside this directory.<br /><br />";
+                }
+                echo "Welcome $_SESSION[user]!<br />Filamp v.0.1.1. <a href=\"https://github.com/Edison2ST/Filamp\">Github</a><br /><br /><a href=\"?chpass\">Change password</a><br /><a href=\"?manage\">Users</a><br /><a href=\"?log\">Log</a><br /><form method=\"post\" action=\"?\"><a href=\"javascript:;\" onclick=\"parentNode.submit();\">Logout</a><input type=\"hidden\" name=\"logout\" value=\"1\" /></form>";
             }
             else echo "Directory not found. <a href=\"?\">Go back!</a>";
         }
     }
 }
-elseif (isset($_POST["user"], $_POST["password"]) && $access->setUser($_POST["user"]) && $login = $access->checkLogin($_POST["password"]))
+elseif (isset($_POST["user"], $_POST["password"]) && $token = $access->checkLogin($_POST["user"], $_POST["password"]))
 {
+    if ($access->setUser($_POST["user"], $token))
+    {
     $_SESSION["user"] = $_POST["user"];
-    $_SESSION["token"] = $login;
+    $_SESSION["token"] = $token;
     header("Location: ?");
     exit;
+    }
+    else
+    {
+        header("Location: ?");
+        exit;
+    }
 }
 elseif (isset($GLOBALS["admin"], $_GET["new"]) && $GLOBALS["admin"])
 {
     if (isset($_POST["user"], $_POST["password"]))
     {
-        if ($access->insertUser($_POST["user"], $_POST["password"], 3, true) && $access->setUser($_POST["user"]) && $access->insertLog(8, "")) echo "Registered succesfully. <a href=\"?\">Go back!</a>";
-        else echo "Error. <a href=\"?new\">Go back!";
+        if ($access->insertUser($_POST["user"], $_POST["password"], 3, true) && $token = $access->checkLogin($_POST["user"], $_POST["password"]))
+        {
+            if ($access->setUser($_POST["user"], $token) && $access->insertLog(8, "") && $access->logout()) echo "Registered succesfully. <a href=\"?\">Go back!</a>";
+            else echo "Error. <a href=\"?new\">Go back!</a>";
+        }
+        else echo "Error. <a href=\"?new\">Go back!</a>";
     }
     else echo "<form method=\"post\" action=\"?new\">User: <input type=\"text\" name=\"user\" /><br />Password: <input type=\"password\" name=\"password\" /><br /><br /><input type=\"submit\" value=\"Register\" /></form>";
 }
