@@ -1,3 +1,9 @@
+# No support
+
+This project was made in 2018 by me. This project served as an example to me about the importance of making clean code. I have made better practices since then.
+
+However, this code works, so you can install it using xampp.
+
 # Filamp
 
 Filamp is an Open Source project and script written in PHP, HTML and Javascript. It has only one file \*.php which could be renamed and its functionality should be the same. Like a File Manager, you could add files, delete files, create directories, remove directories, download files, preview files, edit files, upload files, rename files, copy and paste files, and also manage users and see the log in your server.
@@ -86,11 +92,11 @@ Add an existing user|No|No|No
 Remove the main parent folder|No|No|No
 Change other user's passwords|No|No|No
 
-## Current releases
+## Old releases
 
 Release|Last Patch|Supported since|Supported until|Download
 ---|---|---|---|---
-0.1|1|May 5, 2018||[Link](https://github.com/Edison2ST/Filamp/archive/v0.1.1.zip)
+0.1|1|May 5, 2018|April 20, 2020|[Link](https://github.com/Edison2ST/Filamp/archive/v0.1.1.zip)
 
 ## Upcoming features for the next releases
 
